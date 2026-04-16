@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <title>{{ title }}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="{{ meta_description }}">
+  <link rel="canonical" href="{{ canonical_url }}">
+  <meta property="og:title" content="{{ og_title }}">
+  <meta property="og:description" content="{{ og_description }}">
+  <meta property="og:type" content="{{ og_type }}">
+  <meta property="og:url" content="{{ og_url }}">
+  <link rel="stylesheet" href="style/style.css" />
+  <link rel="stylesheet" href="style/page.css" />
+</head>
+
+<body>
+  <div class="container">
+    <h1>{{ title }}</h1>
+    <button id="theme-switcher" class="theme-switcher">🌓 Switch theme</button>
+    <div class="back-home">
+      <a href="index.html">← Back to Index</a>
+    </div>
+    <p class="page-intro">{{ page_intro }}</p>
+    <div id="subtitle" class="subtitle"></div>
+
+    <div class="controls">
+      <div>
+        <label for="pageSelect">Page:</label>
+        <select id="pageSelect"></select>
+      </div>
+      <div>
+        <label for="limitSelect">Results per page:</label>
+        <select id="limitSelect">
+          <option value="10">10</option>
+          <option value="20" selected>20</option>
+          <option value="50">50</option>
+          <option value="100">100</option>
+        </select>
+      </div>
+    </div>
+
+    <div id="content"></div>
+
+    <footer>
+      <p>© {{ current_year }} <a href="{{ author_url }}" target="_blank" rel="noopener">{{ author_name }}</a></p>
+      <p class="footer-note">Uses data derived from Wikimedia dump files. Underlying Wikimedia content remains subject
+        to the applicable Wikimedia licenses and terms, generally <a
+          href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener noreferrer">CC BY-SA
+          4.0</a>. See <a href="https://dumps.wikimedia.org/legal.html" target="_blank"
+          rel="noopener noreferrer">Wikimedia dump terms</a>.</p>
+      <p class="footer-note">Not affiliated with or endorsed by the Wikimedia Foundation. <a
+          href="https://en.wikipedia.org/wiki/Wikipedia:Red_link" target="_blank" rel="noopener noreferrer">What is a
+          redlink?</a></p>
+    </footer>
+  </div>
+
+  <script src="script/theme-switcher.js"></script>
+  <script>
+    let data = [];
+    let currentPage = 1;
+    let resultsPerPage = 20;
+
+    function extractRecordsCount() {
+      document.getElementById('subtitle').innerHTML = `There are <strong>${data.length}</strong> most requested categories (referenced ten or more times).`;
+    }
+
+    function formatWikiTitleForDisplay(value) {
+      return (value || '').replaceAll('_', ' ');
+    }
+
+    function render() {
+      const container = document.getElementById("content");
+      container.replaceChildren();
+
+      const start = (currentPage - 1) * resultsPerPage;
+      const end = start + resultsPerPage;
+      const pageData = data.slice(start, end);
+      const fragment = document.createDocumentFragment();
+
+      pageData.forEach(entry => {
+        const categoryTitle = `Category:${entry.category}`;
+        const categoryUrl = `https://{{ language }}.wikipedia.org/wiki/${encodeURIComponent(categoryTitle)}`;
+        const card = document.createElement("div");
+        card.className = "wanted-card";
+
+        const categoryAnchor = document.createElement("a");
+        categoryAnchor.href = categoryUrl;
+        categoryAnchor.className = "wanted-redlink";
+        categoryAnchor.target = "_blank";
+        categoryAnchor.rel = "noopener noreferrer";
+        categoryAnchor.textContent = formatWikiTitleForDisplay(categoryTitle);
+
+        const count = document.createElement("span");
+        count.className = "wanted-count";
+        count.textContent = `${entry.count} links`;
+
+        card.appendChild(categoryAnchor);
+        card.appendChild(count);
+        fragment.appendChild(card);
+      });
+
+      container.appendChild(fragment);
+    }
+
+    function populatePaginationControls() {
+      const pageSelect = document.getElementById("pageSelect");
+      const limitSelect = document.getElementById("limitSelect");
+
+      const totalPages = Math.ceil(data.length / resultsPerPage);
+      pageSelect.innerHTML = "";
+      for (let i = 1; i <= totalPages; i++) {
+        const option = document.createElement("option");
+        option.value = i;
+        option.textContent = `${i}`;
+        if (i === currentPage) option.selected = true;
+        pageSelect.appendChild(option);
+      }
+
+      pageSelect.addEventListener("change", () => {
+        currentPage = Number.parseInt(pageSelect.value);
+        render();
+      });
+
+      limitSelect.addEventListener("change", () => {
+        resultsPerPage = Number.parseInt(limitSelect.value);
+        currentPage = 1;
+        populatePaginationControls();
+        render();
+      });
+    }
+
+    fetch('data/wanted_categories.json')
+      .then(response => response.json())
+      .then(json => {
+        data = json;
+        extractRecordsCount();
+        populatePaginationControls();
+        render();
+      })
+      .catch(err => {
+        console.error("Failed to load JSON:", err);
+      });
+  </script>
+</body>
+
+</html>

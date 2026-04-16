@@ -1,0 +1,90 @@
+name: Validate
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/validate.yml"
+      - "infra/**"
+      - "packer/**"
+      - "src/**"
+      - "pyproject.toml"
+      - "uv.lock"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/validate.yml"
+      - "infra/**"
+      - "packer/**"
+      - "src/**"
+      - "pyproject.toml"
+      - "uv.lock"
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Ruff format check
+        run: uvx ruff format --check
+
+      - name: Ruff lint
+        run: uvx ruff check
+
+  terraform-bootstrap:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform fmt
+        run: terraform -chdir=infra/bootstrap fmt -check
+
+      - name: Terraform init
+        run: terraform -chdir=infra/bootstrap init -backend=false -input=false
+
+      - name: Terraform validate
+        run: terraform -chdir=infra/bootstrap validate
+
+  terraform-main:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform fmt
+        run: terraform -chdir=infra/main fmt -check
+
+      - name: Terraform init
+        run: terraform -chdir=infra/main init -backend=false -input=false
+
+      - name: Terraform validate
+        run: terraform -chdir=infra/main validate
+
+  packer:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-packer@v3
+
+      - name: Packer fmt
+        run: packer fmt -check packer
+
+      - name: Packer init
+        run: packer init packer/runner.pkr.hcl
+
+      - name: Packer validate
+        run: packer validate packer/runner.pkr.hcl

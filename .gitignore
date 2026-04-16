@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.ruff_cache/
+build/
+dist/
+
+# Local data / dumps / outputs
+*wiki/
+
+# Env / IDE
+.venv/
+.env
+.DS_Store
+.vscode/
+
+# Terraform / Packer
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+.packer_cache/
+*.pkrvars.hcl
+infra/main/build/*.zip
+infra/bootstrap/terraform.tfvars
+infra/main/backend.hcl
+infra/main/terraform.tfvars

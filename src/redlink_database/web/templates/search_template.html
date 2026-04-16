@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <title>{{ title }}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="{{ meta_description }}">
+  <link rel="canonical" href="{{ canonical_url }}">
+  <meta property="og:title" content="{{ og_title }}">
+  <meta property="og:description" content="{{ og_description }}">
+  <meta property="og:type" content="{{ og_type }}">
+  <meta property="og:url" content="{{ og_url }}">
+  <link rel="stylesheet" href="style/style.css" />
+  <link rel="stylesheet" href="style/page.css" />
+  <link rel="stylesheet" href="style/search.css" />
+</head>
+
+<body>
+  <div class="container">
+    <h1>{{ title }}</h1>
+    <button id="theme-switcher" class="theme-switcher">🌓 Switch theme</button>
+    <div class="back-home">
+      <a href="index.html">← Back to Index</a>
+    </div>
+    <p class="page-intro">{{ page_intro }}</p>
+
+    <div id="subtitle" class="subtitle"></div>
+
+    <div class="searchbar">
+      <input id="searchInput" type="text" placeholder="Search page titles and redlinks… (min 3 chars, case-insensitive)"
+        autocomplete="off" />
+      <button id="searchBtn" title="Start search">Search</button>
+    </div>
+    <div id="searchStatus" class="status" role="status" aria-live="polite"></div>
+    <div id="searchProgress" class="search-progress-steps" aria-hidden="true">
+      <div id="phaseIndex" class="search-phase">
+        <span class="search-phase-dot"></span>
+        <span class="search-phase-label">Index shards</span>
+      </div>
+      <div id="phaseStrings" class="search-phase">
+        <span class="search-phase-dot"></span>
+        <span class="search-phase-label">String shards</span>
+      </div>
+      <div id="phaseRefs" class="search-phase">
+        <span class="search-phase-dot"></span>
+        <span class="search-phase-label">Page refs</span>
+      </div>
+      <div id="phasePages" class="search-phase">
+        <span class="search-phase-dot"></span>
+        <span class="search-phase-label">Full pages</span>
+      </div>
+    </div>
+    <div id="searchProgressBarWrap" class="search-progress-bar-wrap" aria-hidden="true">
+      <div id="searchProgressBar" class="search-progress-bar"></div>
+    </div>
+
+    <div class="controls" aria-hidden="false">
+      <div>
+        <label for="pageSelect">Page:</label>
+        <select id="pageSelect"></select>
+      </div>
+      <div>
+        <label for="limitSelect">Results per page:</label>
+        <select id="limitSelect">
+          <option value="10">10</option>
+          <option value="20" selected>20</option>
+          <option value="50">50</option>
+          <option value="100">100</option>
+        </select>
+      </div>
+    </div>
+
+    <div id="content"></div>
+
+    <footer>
+      <p>© {{ current_year }} <a href="{{ author_url }}" target="_blank" rel="noopener">{{ author_name }}</a>
+      </p>
+      <p class="footer-note">Uses data derived from Wikimedia dump files. Underlying Wikimedia content remains subject
+        to the applicable Wikimedia licenses and terms, generally <a
+          href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener noreferrer">CC BY-SA
+          4.0</a>. See <a href="https://dumps.wikimedia.org/legal.html" target="_blank"
+          rel="noopener noreferrer">Wikimedia dump terms</a>.</p>
+      <p class="footer-note">Not affiliated with or endorsed by the Wikimedia Foundation. <a
+          href="https://en.wikipedia.org/wiki/Wikipedia:Red_link" target="_blank" rel="noopener noreferrer">What is a
+          redlink?</a></p>
+    </footer>
+  </div>
+
+  <script src="script/theme-switcher.js"></script>
+  <script>
+    const SEARCH_BASE_PATH = "data/search";
+    const SEARCH_PAGE_SHARD_SIZE = {{ search_page_shard_size }};
+    const SEARCH_STRING_SHARD_SIZE = {{ search_string_shard_size }};
+    const SEARCH_PROGRESSIVE_STOP_CANDIDATE_STRINGS = {{ search_progressive_stop_candidate_strings }};
+    const SEARCH_NGRAM_SIZE = 3;
+    const TRIGRAM_BUCKET_FETCH_CONCURRENCY = 6;
+    const STRING_SHARD_FETCH_CONCURRENCY = 4;
+    const PAGE_REF_FETCH_CONCURRENCY = 6;
+    const PAGE_SHARD_FETCH_CONCURRENCY = 3;
+    const WIKI_BASE_URL = "https://{{ language }}.wikipedia.org/wiki/";
+    const titleCollator = new Intl.Collator('{{ language }}', { sensitivity: 'base' });
+
+    let data = [];
+    let currentPage = 1;
+    let resultsPerPage = 20;
+    let isSearching = false;
+
+    const contentEl = document.getElementById('content');
+    const subtitleEl = document.getElementById('subtitle');
+    const inputEl = document.getElementById('searchInput');
+    const searchBtnEl = document.getElementById('searchBtn');
+    const pageSelectEl = document.getElementById('pageSelect');
+    const limitSelectEl = document.getElementById('limitSelect');
+    const statusEl = document.getElementById('searchStatus');
+    const progressEl = document.getElementById('searchProgress');
+    const progressBarWrapEl = document.getElementById('searchProgressBarWrap');
+    const progressBarEl = document.getElementById('searchProgressBar');
+    const phaseElements = {
+      index: document.getElementById('phaseIndex'),
+      strings: document.getElementById('phaseStrings'),
+      refs: document.getElementById('phaseRefs'),
+      pages: document.getElementById('phasePages'),
+    };
+
+    function setUIBusy(busy) {
+      isSearching = busy;
+      searchBtnEl.disabled = busy;
+      inputEl.readOnly = busy;
+      pageSelectEl.disabled = busy;
+      limitSelectEl.disabled = busy;
+    }
+
+    function normalizeSearchText(value) {
+      return (value || '')
+        .normalize('NFKD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replaceAll('_', ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    }
+
+    function formatWikiTitleForDisplay(value) {
+      return (value || '').replaceAll('_', ' ');
+    }
+
+    function getTrigrams(value) {
+      const normalized = normalizeSearchText(value);
+      if (normalized.length < SEARCH_NGRAM_SIZE) return [];
+      const trigrams = new Set();
+      for (let index = 0; index <= normalized.length - SEARCH_NGRAM_SIZE; index += 1) {
+        trigrams.add(normalized.slice(index, index + SEARCH_NGRAM_SIZE));
+      }
+      return Array.from(trigrams);
+    }
+
+    function getTrigramBucketKey(trigram) {
+      const normalized = (trigram || '').slice(0, 2).padEnd(2, '_');
+      return Array.from(normalized)
+        .map(character => (/^[a-z0-9]$/i.test(character) ? character.toLowerCase() : '_'))
+        .join('');
+    }
+
+    async function fetchJson(url, fallbackValue) {
+      try {
+        const response = await fetch(url, { cache: 'no-store' });
+        if (!response.ok) return fallbackValue;
+        return await response.json();
+      } catch {
+        return fallbackValue;
+      }
+    }
+
+    async function loadTrigramBucket(bucketKey) {
+      return fetchJson(`${SEARCH_BASE_PATH}/ngrams/${bucketKey}.json`, {});
+    }
+
+    async function loadStringShard(shardId) {
+      const shardName = String(shardId).padStart(5, '0');
+      return fetchJson(`${SEARCH_BASE_PATH}/strings/${shardName}.json`, []);
+    }
+
+    async function loadPageRefShard(shardId) {
+      const shardName = String(shardId).padStart(5, '0');
+      return fetchJson(`${SEARCH_BASE_PATH}/page_refs/${shardName}.json`, []);
+    }
+
+    async function loadPageShard(shardId) {
+      const shardName = String(shardId).padStart(5, '0');
+      return fetchJson(`${SEARCH_BASE_PATH}/pages/${shardName}.json`, []);
+    }
+
+    async function loadNgramCounts() {
+      return fetchJson(`${SEARCH_BASE_PATH}/ngram_counts.json`, {});
+    }
+
+    async function forEachConcurrent(items, concurrency, task) {
+      if (!Array.isArray(items) || !items.length) return;
+      const limit = Math.max(1, Math.min(concurrency || 1, items.length));
+      let nextIndex = 0;
+
+      async function worker() {
+        while (true) {
+          const currentIndex = nextIndex;
+          nextIndex += 1;
+          if (currentIndex >= items.length) return;
+          await task(items[currentIndex], currentIndex);
+        }
+      }
+
+      await Promise.all(Array.from({ length: limit }, () => worker()));
+    }
+
+    function intersectSortedIds(left, right) {
+      const result = [];
+      let leftIndex = 0;
+      let rightIndex = 0;
+
+      while (leftIndex < left.length && rightIndex < right.length) {
+        const leftValue = left[leftIndex];
+        const rightValue = right[rightIndex];
+        if (leftValue === rightValue) {
+          result.push(leftValue);
+          leftIndex += 1;
+          rightIndex += 1;
+          continue;
+        }
+        if (leftValue < rightValue) {
+          leftIndex += 1;
+        } else {
+          rightIndex += 1;
+        }
+      }
+
+      return result;
+    }
+
+    function setStatus(msg, type = 'info') {
+      statusEl.textContent = msg || '';
+      statusEl.classList.toggle('error', type === 'error');
+      statusEl.classList.toggle('loading', type === 'loading');
+      statusEl.classList.toggle('success', type === 'success');
+      if (type !== 'error' && type !== 'loading' && type !== 'success') {
+        statusEl.classList.remove('error');
+        statusEl.classList.remove('loading');
+        statusEl.classList.remove('success');
+      }
+    }
+
+    function resetProgress() {
+      progressEl.classList.remove('visible');
+      progressBarWrapEl.classList.remove('visible');
+      progressBarEl.style.width = '0%';
+      Object.values(phaseElements).forEach(element => {
+        element.classList.remove('active');
+        element.classList.remove('complete');
+        element.classList.remove('skipped');
+      });
+    }
+
+    function activatePhase(phaseName) {
+      progressEl.classList.add('visible');
+      progressBarWrapEl.classList.add('visible');
+      Object.entries(phaseElements).forEach(([name, element]) => {
+        element.classList.toggle('active', name === phaseName);
+      });
+    }
+
+    function setProgress(completed, total) {
+      if (!total || total <= 0) {
+        progressBarEl.style.width = '0%';
+        return;
+      }
+      const percentage = Math.max(0, Math.min(100, (completed / total) * 100));
+      progressBarWrapEl.classList.add('visible');
+      progressBarEl.style.width = `${percentage}%`;
+    }
+
+    function completePhase(phaseName) {
+      const element = phaseElements[phaseName];
+      if (!element) return;
+      element.classList.remove('active');
+      element.classList.add('complete');
+    }
+
+    function skipPhase(phaseName) {
+      const element = phaseElements[phaseName];
+      if (!element) return;
+      element.classList.remove('active');
+      element.classList.add('skipped');
+    }
+
+    function extractRecordsCount() {
+      let redlinksCount = 0;
+      data.forEach(entry => {
+        if (Array.isArray(entry.redlinks)) {
+          redlinksCount += entry.redlinks.length;
+        }
+      });
+      subtitleEl.innerHTML = `There are <strong>${data.length}</strong> pages displayed, with <strong>${redlinksCount}</strong> redlinks.`;
+    }
+
+    function clearResults() {
+      data = [];
+      currentPage = 1;
+      contentEl.replaceChildren();
+      subtitleEl.textContent = '';
+      pageSelectEl.replaceChildren();
+    }
+
+    function render() {
+      const start = (currentPage - 1) * resultsPerPage;
+      const end = start + resultsPerPage;
+      const pageData = data.slice(start, end);
+      const fragment = document.createDocumentFragment();
+
+      pageData.forEach(entry => {
+        const section = document.createElement('div');
+        section.className = 'page-section';
+
+        const title = document.createElement('div');
+        title.className = 'page-title';
+        const titleLink = document.createElement('a');
+        titleLink.href = WIKI_BASE_URL + encodeURIComponent(entry.page_title);
+        titleLink.target = '_blank';
+        titleLink.rel = 'noopener noreferrer';
+        titleLink.textContent = formatWikiTitleForDisplay(entry.page_title);
+        title.appendChild(titleLink);
+        section.appendChild(title);
+
+        const list = document.createElement('ul');
+        list.className = 'redlink-list';
+        entry.redlinks.forEach(link => {
+          const item = document.createElement('li');
+          const redlinkAnchor = document.createElement('a');
+          redlinkAnchor.href = WIKI_BASE_URL + encodeURIComponent(link);
+          redlinkAnchor.target = '_blank';
+          redlinkAnchor.rel = 'noopener noreferrer';
+          redlinkAnchor.textContent = formatWikiTitleForDisplay(link);
+          item.appendChild(redlinkAnchor);
+          list.appendChild(item);
+        });
+
+        section.appendChild(list);
+        fragment.appendChild(section);
+      });
+
+      contentEl.replaceChildren(fragment);
+    }
+
+    function populatePaginationControls() {
+      const totalPages = Math.ceil(data.length / resultsPerPage) || 1;
+      pageSelectEl.innerHTML = '';
+
+      for (let pageNumber = 1; pageNumber <= totalPages; pageNumber += 1) {
+        const option = document.createElement('option');
+        option.value = pageNumber;
+        option.textContent = `${pageNumber}`;
+        if (pageNumber === currentPage) option.selected = true;
+        pageSelectEl.appendChild(option);
+      }
+
+      pageSelectEl.onchange = () => {
+        currentPage = Number.parseInt(pageSelectEl.value, 10);
+        render();
+      };
+      limitSelectEl.onchange = () => {
+        resultsPerPage = Number.parseInt(limitSelectEl.value, 10);
+        currentPage = 1;
+        populatePaginationControls();
+        render();
+      };
+    }
+
+    async function searchIndex(queryRaw) {
+      if (isSearching) return;
+
+      const raw = (queryRaw || '').trim();
+      const normalizedQuery = normalizeSearchText(raw);
+      clearResults();
+      resetProgress();
+
+      if (!raw) {
+        setStatus('Type 3+ characters to search.', 'error');
+        extractRecordsCount();
+        populatePaginationControls();
+        render();
+        return;
+      }
+
+      if (normalizedQuery.length < SEARCH_NGRAM_SIZE) {
+        setStatus('Please enter at least 3 characters.', 'error');
+        extractRecordsCount();
+        populatePaginationControls();
+        render();
+        return;
+      }
+
+      setUIBusy(true);
+      try {
+        const trigrams = getTrigrams(normalizedQuery);
+        const ngramCounts = await loadNgramCounts();
+        const sortedTrigrams = trigrams
+          .map(trigram => ({ trigram, count: ngramCounts[trigram] || 0 }))
+          .sort((left, right) => left.count - right.count);
+
+        if (sortedTrigrams.some(item => item.count === 0)) {
+          setStatus('Done. No matches.', 'success');
+          resetProgress();
+          extractRecordsCount();
+          populatePaginationControls();
+          render();
+          return;
+        }
+
+        const bucketKeys = Array.from(new Set(sortedTrigrams.map(item => getTrigramBucketKey(item.trigram))));
+        const localTrigramBuckets = new Map();
+        activatePhase('index');
+        setStatus(`Loading ${bucketKeys.length} search index shards…`, 'loading');
+        let loadedBucketCount = 0;
+        setProgress(0, bucketKeys.length);
+        await forEachConcurrent(bucketKeys, TRIGRAM_BUCKET_FETCH_CONCURRENCY, async bucketKey => {
+          const bucketPayload = await loadTrigramBucket(bucketKey);
+          localTrigramBuckets.set(bucketKey, bucketPayload);
+          loadedBucketCount += 1;
+          setProgress(loadedBucketCount, bucketKeys.length);
+        });
+        completePhase('index');
+        let candidateStringIds = [];
+        for (let index = 0; index < sortedTrigrams.length; index += 1) {
+          const trigram = sortedTrigrams[index].trigram;
+          const bucketKey = getTrigramBucketKey(trigram);
+          const bucketPayload = localTrigramBuckets.get(bucketKey) || {};
+          const postingList = Array.isArray(bucketPayload[trigram]) ? bucketPayload[trigram] : [];
+          if (!postingList.length) {
+            candidateStringIds = [];
+            break;
+          }
+          if (index === 0) {
+            candidateStringIds = postingList.slice();
+          } else {
+            candidateStringIds = intersectSortedIds(candidateStringIds, postingList);
+          }
+          if (!candidateStringIds.length) {
+            break;
+          }
+          if (candidateStringIds.length <= SEARCH_PROGRESSIVE_STOP_CANDIDATE_STRINGS) {
+            break;
+          }
+        }
+
+        if (!candidateStringIds.length) {
+          setStatus('Done. No matches.', 'success');
+          resetProgress();
+          extractRecordsCount();
+          populatePaginationControls();
+          render();
+          return;
+        }
+
+        const candidateStringIdSet = new Set(candidateStringIds);
+        const stringShardIds = Array.from(
+          new Set(candidateStringIds.map(stringId => Math.floor(stringId / SEARCH_STRING_SHARD_SIZE)))
+        ).sort((left, right) => left - right);
+        activatePhase('strings');
+        setStatus(`Loading ${stringShardIds.length} search string shards…`, 'loading');
+        let loadedStringShardCount = 0;
+        setProgress(0, stringShardIds.length);
+
+        const titleMatchedPageIds = new Set();
+        const matchedRedlinksByPage = new Map();
+        const matchedPageIds = new Set();
+        await forEachConcurrent(stringShardIds, STRING_SHARD_FETCH_CONCURRENCY, async shardId => {
+          const strings = await loadStringShard(shardId);
+          strings.forEach(stringRecord => {
+            if (!candidateStringIdSet.has(stringRecord.id)) {
+              return;
+            }
+
+            const value = stringRecord.value || '';
+            if (!normalizeSearchText(value).includes(normalizedQuery)) {
+              return;
+            }
+
+            const pageIds = Array.isArray(stringRecord.page_ids) ? stringRecord.page_ids : [];
+            pageIds.forEach(pageId => {
+              matchedPageIds.add(pageId);
+              if (stringRecord.kind === 'page_title') {
+                titleMatchedPageIds.add(pageId);
+                return;
+              }
+              if (!matchedRedlinksByPage.has(pageId)) {
+                matchedRedlinksByPage.set(pageId, []);
+              }
+              matchedRedlinksByPage.get(pageId).push(value);
+            });
+          });
+          loadedStringShardCount += 1;
+          setProgress(loadedStringShardCount, stringShardIds.length);
+        });
+        completePhase('strings');
+
+        if (!matchedPageIds.size) {
+          setStatus('Done. No matches.', 'success');
+          resetProgress();
+          extractRecordsCount();
+          populatePaginationControls();
+          render();
+          return;
+        }
+
+        const pageRefShardIds = Array.from(
+          new Set(Array.from(matchedPageIds).map(pageId => Math.floor(pageId / SEARCH_PAGE_SHARD_SIZE)))
+        ).sort((left, right) => left - right);
+        activatePhase('refs');
+        setStatus(`Loading ${pageRefShardIds.length} page references…`, 'loading');
+        let loadedPageRefShardCount = 0;
+        setProgress(0, pageRefShardIds.length);
+        const pageRefsById = new Map();
+        await forEachConcurrent(pageRefShardIds, PAGE_REF_FETCH_CONCURRENCY, async shardId => {
+          const pageRefs = await loadPageRefShard(shardId);
+          pageRefs.forEach(pageRef => {
+            pageRefsById.set(pageRef.id, pageRef);
+          });
+          loadedPageRefShardCount += 1;
+          setProgress(loadedPageRefShardCount, pageRefShardIds.length);
+        });
+        completePhase('refs');
+
+        const titleMatchPageShardIds = Array.from(
+          new Set(Array.from(titleMatchedPageIds).map(pageId => Math.floor(pageId / SEARCH_PAGE_SHARD_SIZE)))
+        ).sort((left, right) => left - right);
+        const pagesById = new Map();
+        if (titleMatchPageShardIds.length) {
+          activatePhase('pages');
+          setStatus(`Loading ${titleMatchPageShardIds.length} full page shards…`, 'loading');
+          let loadedPageShardCount = 0;
+          setProgress(0, titleMatchPageShardIds.length);
+          await forEachConcurrent(titleMatchPageShardIds, PAGE_SHARD_FETCH_CONCURRENCY, async shardId => {
+            const pages = await loadPageShard(shardId);
+            pages.forEach(page => {
+              pagesById.set(page.id, page);
+            });
+            loadedPageShardCount += 1;
+            setProgress(loadedPageShardCount, titleMatchPageShardIds.length);
+          });
+          completePhase('pages');
+        } else {
+          skipPhase('pages');
+          progressBarWrapEl.classList.remove('visible');
+        }
+
+        const matches = [];
+        matchedPageIds.forEach(pageId => {
+          const pageRef = pageRefsById.get(pageId);
+          if (!pageRef) return;
+
+          if (titleMatchedPageIds.has(pageId)) {
+            const fullPage = pagesById.get(pageId);
+            if (fullPage) {
+              matches.push({
+                page_title: fullPage.page_title,
+                redlinks: Array.isArray(fullPage.redlinks) ? fullPage.redlinks : [],
+                title_match: true,
+              });
+              return;
+            }
+          }
+
+          matches.push({
+            page_title: pageRef.page_title,
+            redlinks: matchedRedlinksByPage.get(pageId) || [],
+            title_match: false,
+          });
+        });
+
+        data = matches
+          .sort((left, right) => titleCollator.compare(left.page_title, right.page_title))
+          .map(({ title_match, ...entry }) => entry);
+
+        setStatus(data.length ? 'Done.' : 'Done. No matches.', 'success');
+        resetProgress();
+        extractRecordsCount();
+        populatePaginationControls();
+        render();
+      } finally {
+        setUIBusy(false);
+      }
+    }
+
+    searchBtnEl.addEventListener('click', () => searchIndex(inputEl.value));
+    inputEl.addEventListener('keydown', event => {
+      if (event.key === 'Enter') searchIndex(inputEl.value);
+    });
+
+    extractRecordsCount();
+    populatePaginationControls();
+    render();
+    setStatus('Type 3+ characters to search.', 'info');
+  </script>
+</body>
+
+</html>

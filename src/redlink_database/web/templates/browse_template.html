@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <title>{{ title }}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="{{ meta_description }}">
+  <link rel="canonical" href="{{ canonical_url }}">
+  <meta property="og:title" content="{{ og_title }}">
+  <meta property="og:description" content="{{ og_description }}">
+  <meta property="og:type" content="{{ og_type }}">
+  <meta property="og:url" content="{{ og_url }}">
+  <link rel="stylesheet" href="style/style.css" />
+  <link rel="stylesheet" href="style/page.css" />
+</head>
+
+<body>
+  <div class="container">
+    <h1>{{ title }}</h1>
+    <button id="theme-switcher" class="theme-switcher">🌓 Switch theme</button>
+    <div class="back-home">
+      <a href="index.html">← Back to Index</a>
+    </div>
+    <p class="page-intro">{{ page_intro }}</p>
+    <div id="subtitle" class="subtitle"></div>
+
+    <div class="controls">
+      <div>
+        <label for="initialSelect">Initial:</label>
+        <select id="initialSelect">
+          {% for option in initial_options %}
+          <option value="{{ option.value }}"{% if option.value == default_initial %} selected{% endif %}>{{ option.label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="pageSelect">Page:</label>
+        <select id="pageSelect"></select>
+      </div>
+      <div>
+        <label for="limitSelect">Results per page:</label>
+        <select id="limitSelect">
+          <option value="10">10</option>
+          <option value="20" selected>20</option>
+          <option value="50">50</option>
+          <option value="100">100</option>
+        </select>
+      </div>
+    </div>
+
+    <div id="content"></div>
+
+    <footer>
+      <p>© {{ current_year }} <a href="{{ author_url }}" target="_blank" rel="noopener">{{ author_name }}</a></p>
+      <p class="footer-note">Uses data derived from Wikimedia dump files. Underlying Wikimedia content remains subject to the applicable Wikimedia licenses and terms, generally <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener noreferrer">CC BY-SA 4.0</a>. See <a href="https://dumps.wikimedia.org/legal.html" target="_blank" rel="noopener noreferrer">Wikimedia dump terms</a>.</p>
+      <p class="footer-note">Not affiliated with or endorsed by the Wikimedia Foundation. <a href="https://en.wikipedia.org/wiki/Wikipedia:Red_link" target="_blank" rel="noopener noreferrer">What is a redlink?</a></p>
+    </footer>
+  </div>
+
+  <script src="script/theme-switcher.js"></script>
+  <script>
+    let data = [];
+    let currentPage = 1;
+    let resultsPerPage = 20;
+    let currentInitial = "{{ default_initial }}";
+
+    const initialSelect = document.getElementById("initialSelect");
+    const pageSelect = document.getElementById("pageSelect");
+    const limitSelect = document.getElementById("limitSelect");
+    const subtitle = document.getElementById("subtitle");
+    const initialLabelByValue = Object.fromEntries([
+      {% for option in initial_options %}
+      ["{{ option.value }}", "{{ option.label }}"],
+      {% endfor %}
+    ]);
+
+    function extractRecordsCount() {
+      let redlinks_count = 0;
+      data.forEach(item => {
+        if (item.redlinks && Array.isArray(item.redlinks)) {
+          redlinks_count += item.redlinks.length;
+        }
+      });
+
+      const initialLabel = initialLabelByValue[currentInitial] || currentInitial.toUpperCase();
+      subtitle.innerHTML = `Showing <strong>${data.length}</strong> pages under <strong>${initialLabel}</strong>, with <strong>${redlinks_count}</strong> redlinks.`;
+    }
+
+    function formatWikiTitleForDisplay(value) {
+      return (value || '').replaceAll('_', ' ');
+    }
+
+    function render() {
+      const container = document.getElementById("content");
+      container.replaceChildren();
+
+      const start = (currentPage - 1) * resultsPerPage;
+      const end = start + resultsPerPage;
+      const pageData = data.slice(start, end);
+      const fragment = document.createDocumentFragment();
+
+      pageData.forEach(entry => {
+        const section = document.createElement("div");
+        section.className = "page-section";
+
+        const title = document.createElement("div");
+        title.className = "page-title";
+        const titleLink = document.createElement("a");
+        titleLink.href = 'https://{{ language }}.wikipedia.org/wiki/' + encodeURIComponent(entry.page_title);
+        titleLink.target = "_blank";
+        titleLink.rel = "noopener noreferrer";
+        titleLink.textContent = formatWikiTitleForDisplay(entry.page_title);
+        title.appendChild(titleLink);
+        section.appendChild(title);
+
+        const ul = document.createElement("ul");
+        ul.className = "redlink-list";
+
+        entry.redlinks.forEach(link => {
+          const li = document.createElement("li");
+          const redlinkAnchor = document.createElement("a");
+          redlinkAnchor.href = 'https://{{ language }}.wikipedia.org/wiki/' + encodeURIComponent(link);
+          redlinkAnchor.target = "_blank";
+          redlinkAnchor.rel = "noopener noreferrer";
+          redlinkAnchor.textContent = formatWikiTitleForDisplay(link);
+          li.appendChild(redlinkAnchor);
+          ul.appendChild(li);
+        });
+
+        section.appendChild(ul);
+        fragment.appendChild(section);
+      });
+
+      container.appendChild(fragment);
+    }
+
+    function populatePaginationControls() {
+      const totalPages = Math.ceil(data.length / resultsPerPage);
+      pageSelect.innerHTML = "";
+      for (let i = 1; i <= totalPages; i++) {
+        const option = document.createElement("option");
+        option.value = i;
+        option.textContent = `${i}`;
+        if (i === currentPage) option.selected = true;
+        pageSelect.appendChild(option);
+      }
+    }
+
+    function getInitialJsonPath(initial) {
+      return `data/${initial}.json`;
+    }
+
+    async function loadInitial(initial) {
+      currentInitial = initial;
+      currentPage = 1;
+      try {
+        const response = await fetch(getInitialJsonPath(initial));
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        data = await response.json();
+        extractRecordsCount();
+        populatePaginationControls();
+        render();
+      } catch (error) {
+        console.error("Failed to load grouped JSON:", error);
+        data = [];
+        subtitle.textContent = "Failed to load grouped data.";
+        pageSelect.innerHTML = "";
+        document.getElementById("content").replaceChildren();
+      }
+    }
+
+    initialSelect.addEventListener("change", () => {
+      loadInitial(initialSelect.value);
+    });
+
+    pageSelect.addEventListener("change", () => {
+      currentPage = Number.parseInt(pageSelect.value);
+      render();
+    });
+
+    limitSelect.addEventListener("change", () => {
+      resultsPerPage = Number.parseInt(limitSelect.value);
+      currentPage = 1;
+      populatePaginationControls();
+      render();
+    });
+
+    loadInitial(currentInitial);
+  </script>
+</body>
+
+</html>

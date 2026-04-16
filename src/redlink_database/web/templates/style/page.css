@@ -1,0 +1,130 @@
+.page-section {
+  margin-bottom: 2rem;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 1rem;
+}
+
+.page-title {
+  font-size: 1.2rem;
+  font-weight: 600;
+  margin-bottom: 0.3rem;
+  display: inline-block;
+}
+
+.page-title a {
+  color: #36c;
+}
+
+.page-title a:hover {
+  color: #3056a9;
+  text-decoration: underline;
+}
+
+.page-title a:active {
+  color: #233566;
+}
+
+ul.redlink-list {
+  list-style: none;
+  padding-left: 1rem;
+  margin: 0.5rem 0 0 0;
+}
+
+ul.redlink-list li {
+  margin: 0.2rem 0;
+}
+
+ul.redlink-list li a {
+  color: #bf3c2c;
+  text-decoration: none;
+}
+
+ul.redlink-list li a:hover {
+  color: #9f3526;
+  text-decoration: underline;
+}
+
+ul.redlink-list li a:active {
+  color: #612419;
+}
+
+.subtitle {
+  font-size: 1rem;
+  color: #777;
+  margin-bottom: 1.5em;
+}
+
+.controls {
+  margin-bottom: 1.5rem;
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.controls label {
+  font-weight: 500;
+  margin-right: 0.5rem;
+}
+
+.controls select {
+  padding: 0.3rem 0.6rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 1rem;
+}
+
+.back-home {
+  margin-bottom: 1rem;
+  font-size: 0.95rem;
+}
+
+.back-home a {
+  color: var(--link);
+  text-decoration: none;
+}
+
+.back-home a:hover {
+  color: var(--link-hover);
+  text-decoration: underline;
+}
+
+.back-home a:active {
+  color: var(--link-active);
+}
+
+.wanted-list {
+  margin: 2.5rem 0 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.wanted-card {
+  display: flex;
+  align-items: center;
+  padding: 1.3rem 0 1.3rem 0.2rem;
+  border-bottom: 1px solid var(--border);
+  gap: 1.5rem;
+}
+
+.wanted-redlink {
+  color: #bf3c2c;
+  font-weight: 700;
+  font-size: 1.22rem;
+  transition: color 0.16s;
+}
+
+.wanted-redlink:hover {
+  color: #9f3526;
+  text-decoration: underline;
+}
+
+.wanted-redlink:active {
+  color: #612419;
+}
+
+.wanted-count {
+  color: #888;
+  font-size: 1.09rem;
+  font-weight: 500;
+  margin-left: auto;
+}

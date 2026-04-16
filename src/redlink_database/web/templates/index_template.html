@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <title>{{ title }}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="{{ meta_description }}">
+  <link rel="canonical" href="{{ canonical_url }}">
+  <meta property="og:title" content="{{ og_title }}">
+  <meta property="og:description" content="{{ og_description }}">
+  <meta property="og:type" content="{{ og_type }}">
+  <meta property="og:url" content="{{ og_url }}">
+  <link rel="stylesheet" href="style/style.css">
+  <link rel="stylesheet" href="style/index.css">
+</head>
+
+<body>
+  <div class="container">
+    <h1>{{ title }}</h1>
+    <button id="theme-switcher" class="theme-switcher">🌓 Switch theme</button>
+    <div class="subtitle">{{ wiki_name }} · Dump version: {{ dump_version }}</div>
+    <p class="page-intro">{{ page_intro }}</p>
+
+    <div class="grid">
+      <a href="search.html" class="card full-card">Search</a>
+      <a href="browse.html" class="card full-card">Browse by initial</a>
+      <a href="wanted.html" class="card full-card">Wanted Pages</a>
+      <a href="wanted_categories.html" class="card full-card">Wanted Categories</a>
+    </div>
+
+    <footer>
+      <p>© {{ current_year }} <a href="{{ author_url }}" target="_blank" rel="noopener">{{ author_name }}</a></p>
+      <p class="footer-note">Uses data derived from Wikimedia dump files. Underlying Wikimedia content remains subject to the applicable Wikimedia licenses and terms, generally <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noopener noreferrer">CC BY-SA 4.0</a>. See <a href="https://dumps.wikimedia.org/legal.html" target="_blank" rel="noopener noreferrer">Wikimedia dump terms</a>.</p>
+      <p class="footer-note">Not affiliated with or endorsed by the Wikimedia Foundation. <a href="https://en.wikipedia.org/wiki/Wikipedia:Red_link" target="_blank" rel="noopener noreferrer">What is a redlink?</a></p>
+    </footer>
+
+    <script src="script/theme-switcher.js"></script>
+  </div>
+</body>
+
+</html>

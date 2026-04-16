@@ -1,0 +1,26 @@
+set -eu
+
+export PATH="/opt/redlink-database/.venv/bin:$${PATH}"
+export PYTHONUNBUFFERED=1
+mkdir -p /data
+
+force_arg=""
+if [ "$${REDLINK_FORCE:-0}" = "1" ]; then
+  force_arg="--force"
+fi
+
+redlink-database \
+  --language "$REDLINK_LANGUAGE" \
+  --data-root /data \
+  --download --decompress --import --web \
+  --duckdb-memory-limit ${duckdb_memory_limit} \
+  --duckdb-threads ${duckdb_threads} \
+  --decompress-workers ${decompress_workers} \
+  --parallel-workers ${parallel_workers} \
+  --parallel-chunk-insert-lines ${parallel_chunk_insert_lines} \
+  --parallel-target-chunk-multiplier ${parallel_target_chunk_multiplier} \
+  --web-batch-size ${web_batch_size} \
+  $${force_arg}
+
+aws s3 sync /data/"$REDLINK_LANGUAGE"wiki/"$REDLINK_DUMP_VERSION"/web s3://${artifacts_bucket}/"$REDLINK_LANGUAGE"wiki/"$REDLINK_DUMP_VERSION"/web --delete
+aws s3 sync /data/"$REDLINK_LANGUAGE"wiki/"$REDLINK_DUMP_VERSION"/web s3://${live_bucket} --delete
