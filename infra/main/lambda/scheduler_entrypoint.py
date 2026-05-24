@@ -165,10 +165,6 @@ def handler(event: dict, context: object) -> dict:
         target_dump_version = latest_remote_dump
 
     if not force and current_dump is not None and target_dump_version <= current_dump:
-        _publish(
-            f"Skipped scheduled run for {wiki_name}: latest processed dump is already {current_dump}.",
-            SKIPPED_NOTIFICATION_SUBJECT,
-        )
         return {
             "started": False,
             "reason": "already_processed",
