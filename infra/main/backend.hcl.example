@@ -1,5 +1,5 @@
 bucket         = "your-project-tfstate-us-east-1"
 key            = "infra/main/terraform.tfstate"
 region         = "us-east-1"
-dynamodb_table = "your-project-terraform-locks"
+use_lockfile   = true
 encrypt        = true
