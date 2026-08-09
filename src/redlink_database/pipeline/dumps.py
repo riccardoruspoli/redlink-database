@@ -15,10 +15,14 @@ from natsort import natsorted
 from redlink_database.pipeline.config import TABLE_CONFIG, RuntimeConfig, SharedCounter
 from redlink_database.pipeline.paths import get_files_from_directory
 
+DOWNLOAD_WORKERS = 1
+DOWNLOAD_START_DELAY_SECONDS = 1
+REQUEST_HEADERS = {"User-Agent": "redlink-database/0.1"}
+
 
 def _get_html_links(url: str) -> list[str]:
     try:
-        response = requests.get(url)
+        response = requests.get(url, headers=REQUEST_HEADERS)
         response.raise_for_status()
     except requests.RequestException as exc:
         raise SystemExit(f"❌ Failed to retrieve URL: {url} | {exc}") from exc
@@ -65,7 +69,9 @@ def get_files_from_url(url: str, base_path: str) -> list[str]:
 
 def _probe_remote_file_size(url: str) -> int:
     try:
-        head_resp = requests.head(url, allow_redirects=True, timeout=10)
+        head_resp = requests.head(
+            url, headers=REQUEST_HEADERS, allow_redirects=True, timeout=10
+        )
         return int(head_resp.headers.get("Content-Length", -1))
     except OSError, ValueError:
         return -1
@@ -79,11 +85,34 @@ def _get_local_file_size(filepath: str) -> int:
 
 
 def _stream_download_to_file(url: str, filepath: str) -> None:
-    response = requests.get(url, stream=True)
-    response.raise_for_status()
+    response = requests.get(url, headers=REQUEST_HEADERS, stream=True)
+    try:
+        response.raise_for_status()
+    except requests.HTTPError as exc:
+        retry_after = response.headers.get("Retry-After")
+        retry_hint = f" Retry-After: {retry_after}." if retry_after else ""
+        raise RuntimeError(
+            f"Download failed for {url} with HTTP {response.status_code}.{retry_hint}"
+        ) from exc
     with open(filepath, "wb") as handle:
         for chunk in response.iter_content(chunk_size=8192):
             handle.write(chunk)
+
+
+def _download_file(url: str, save_dir: str, force: bool) -> str:
+    """Download one dump file or report that its complete local copy is reused."""
+
+    start_time = time.time()
+    filename = os.path.basename(urlparse(url).path)
+    filepath = os.path.join(save_dir, filename)
+    remote_size = _probe_remote_file_size(url)
+    local_size = _get_local_file_size(filepath)
+
+    if local_size != -1 and remote_size == local_size and not force:
+        return f"⚠️ [{time.time() - start_time:.2f}s] Skipping {filename}, already downloaded."
+
+    _stream_download_to_file(url, filepath)
+    return f"✅ [{time.time() - start_time:.2f}s] Saved: {filename}"
 
 
 def download_files(
@@ -91,30 +120,15 @@ def download_files(
 ) -> None:
     """Download required dump files, skipping matching local copies unless forced."""
 
-    counter = 0
     total_files = len(file_urls)
-
-    for url in file_urls:
-        start_time = time.time()
-        filename = os.path.basename(urlparse(url).path)
-        filepath = os.path.join(save_dir, filename)
-
-        remote_size = _probe_remote_file_size(url)
-        local_size = _get_local_file_size(filepath)
-
-        if local_size != -1 and remote_size == local_size and not config.force:
-            counter += 1
-            print(
-                f"⚠️ [{counter}/{total_files}] [{time.time() - start_time:.2f}s] Skipping {filename}, already downloaded."
-            )
-            continue
-
-        _stream_download_to_file(url, filepath)
-
-        counter += 1
-        print(
-            f"✅ [{counter}/{total_files}] [{time.time() - start_time:.2f}s] Saved: {filename}"
-        )
+    with ThreadPoolExecutor(max_workers=DOWNLOAD_WORKERS) as executor:
+        tasks = []
+        for index, url in enumerate(file_urls):
+            tasks.append(executor.submit(_download_file, url, save_dir, config.force))
+            if index < total_files - 1:
+                time.sleep(DOWNLOAD_START_DELAY_SECONDS)
+        for counter, future in enumerate(as_completed(tasks), start=1):
+            print(f"[{counter}/{total_files}] {future.result()}")
 
 
 def _decompress_gz_file(

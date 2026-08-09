@@ -11,6 +11,7 @@ fi
 
 redlink-database \
   --language "$REDLINK_LANGUAGE" \
+  --dump-version "$REDLINK_DUMP_VERSION" \
   --data-root /data \
   --download --decompress --import --web \
   --duckdb-memory-limit ${duckdb_memory_limit} \

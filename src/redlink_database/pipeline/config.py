@@ -126,6 +126,7 @@ class RuntimeConfig:
     web: bool
     force: bool
     language: str
+    dump_version: str | None
     data_root: str
     duckdb_memory_limit: str
     duckdb_threads: int
@@ -146,6 +147,7 @@ class RuntimeConfig:
             web=args.web,
             force=args.force,
             language=args.language,
+            dump_version=args.dump_version,
             data_root=args.data_root,
             duckdb_memory_limit=args.duckdb_memory_limit,
             duckdb_threads=args.duckdb_threads,

@@ -1,6 +1,7 @@
 import argparse
 import os
 import re
+import sys
 import time
 from collections.abc import Sequence
 from typing import Any
@@ -74,10 +75,16 @@ def _resolve_dump_context(config: RuntimeConfig) -> DumpContext:
     base_path = language + "wiki"
     print(f"ℹ️ Processing dump from {base_path}")
 
-    mirror = f"https://mirror.accum.se/mirror/wikimedia.org/dumps/{base_path}/?C=N;O=A"
-    target_dump_link = get_subfolders(mirror)[-1]
-    remote_dump_path = re.search(rf"{base_path}/\d{{8}}", target_dump_link).group(0)
-    remote_dump_version = remote_dump_path.split("/")[1]
+    dumps_root = f"https://dumps.wikimedia.org/{base_path}/"
+    remote_dump_version = config.dump_version
+    if remote_dump_version is None:
+        available_versions = [
+            re.search(rf"{base_path}/(\d{{8}})/$", folder).group(1)
+            for folder in get_subfolders(dumps_root)
+            if re.search(rf"{base_path}/\d{{8}}/$", folder)
+        ]
+        remote_dump_version = max(available_versions)
+    target_dump_link = f"{dumps_root}{remote_dump_version}/"
     local_base_root = os.path.join(data_root, base_path)
     local_dump_root = os.path.join(local_base_root, remote_dump_version)
     local_dump_version = _resolve_local_dump_version(local_base_root)
@@ -235,6 +242,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Wikipedia language code, e.g. en, es, it",
     )
     parser.add_argument(
+        "--dump-version",
+        type=str,
+        help="Specific dump version in YYYYMMDD format; defaults to the latest official dump",
+    )
+    parser.add_argument(
         "--data-root",
         type=str,
         default=".",
@@ -328,8 +340,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"🕒 [TOTAL] Script duration: {total_duration:.2f} seconds")
         return 0
     except KeyboardInterrupt:
-        print(f"{args.prog}: interrupted")
+        print(f"{args.prog}: interrupted", file=sys.stderr)
         return 130
     except Exception as exc:
-        print(f"Unhandled error: {exc}")
+        print(f"Unhandled error: {exc}", file=sys.stderr)
         return 1
